@@ -1,0 +1,86 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.ensemble import StackingClassifier, RandomForestClassifier, GradientBoostingClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
+import xgboost as xgb
+import shap
+
+# Load drilling data
+data = pd.read_csv('path_to_your_drilling_data.csv')
+X, y = data[['x', 'y', 'z']], data['lithology']
+
+# Split the dataset
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Random Forest hyperparameter search
+param_grid_rf = {
+    'n_estimators': [50, 100, 150],
+    'max_depth': [3, 5, 7],
+    'random_state': [42]
+}
+rf = GridSearchCV(RandomForestClassifier(), param_grid_rf, cv=3, verbose=1)
+rf.fit(X_train, y_train)
+best_rf = rf.best_estimator_
+
+# XGBoost hyperparameter search
+param_grid_xgb = {
+    'n_estimators': [50, 100, 150],
+    'learning_rate': [0.01, 0.05, 0.1],
+    'random_state': [42]
+}
+xgb_grid = GridSearchCV(xgb.XGBClassifier(), param_grid_xgb, cv=3, verbose=1)
+xgb_grid.fit(X_train, y_train)
+best_xgb = xgb_grid.best_estimator_
+
+# Base models and stacking classifier setup
+base_learners = [
+    ("dt", DecisionTreeClassifier(max_depth=5)),
+    ("rf", best_rf),
+    ("xgb", best_xgb),
+    ("gbdt", GradientBoostingClassifier(n_estimators=100, learning_rate=0.05, random_state=42)),
+    ("knn", KNeighborsClassifier(n_neighbors=5))
+]
+stack_clf = StackingClassifier(estimators=base_learners, final_estimator=LogisticRegression())
+
+# Train the stacking classifier
+stack_clf.fit(X_train, y_train)
+
+# Prediction and evaluation
+y_pred = stack_clf.predict(X_test)
+print("\nStacking Classifier Performance:")
+print("F1 Score:", f1_score(y_test, y_pred, average='weighted'))  # Use weighted due to multiple classes in lithology
+print("Precision:", precision_score(y_test, y_pred, average='weighted'))
+print("Recall:", recall_score(y_test, y_pred, average='weighted'))
+
+# Base model performance
+for name, learner in base_learners:
+    learner.fit(X_train, y_train)
+    y_pred_base = learner.predict(X_test)
+    print(f"\n{name.upper()} Performance:")
+    print("F1 Score:", f1_score(y_test, y_pred_base, average='weighted'))
+    print("Precision:", precision_score(y_test, y_pred_base, average='weighted'))
+    print("Recall:", recall_score(y_test, y_pred_base, average='weighted'))
+
+# 3D Visualization
+def plot_3d(x, y, z, values, title):
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    p = ax.scatter(x, y, z, c=values, cmap='viridis')
+    fig.colorbar(p, label='Lithology')
+    ax.set_xlabel('X-axis')
+    ax.set_ylabel('Y-axis')
+    ax.set_zlabel('Z-axis')
+    ax.set_title(title)
+    plt.show()
+
+x = X_test['x'].values
+y = X_test['y'].values
+z = X_test['z'].values
+
+plot_3d(x, y, z, y_pred, "3D Geological Model Visualization")
